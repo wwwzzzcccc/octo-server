@@ -61,33 +61,31 @@ func TestGroupAvatarGetAutoNamedRendersIcon(t *testing.T) {
 	require.Empty(t, w2.Body.Bytes())
 }
 
-// TestGroupAvatarGetNamedRendersNameText 覆盖：用户**显式起名**（is_named=1）且无自定义
-// 文字 → 取群名前 2 字（script 感知）渲染文字，而非双人图标。
-func TestGroupAvatarGetNamedRendersNameText(t *testing.T) {
+// TestGroupAvatarGetNamedRendersIcon 覆盖产品 2026-06-29 改版：即使群是用户**显式起名**
+// （is_named=1），无自定义 avatar_text 时默认头像也一律渲染双人图标——群名不再作为头像
+// 文字来源。带弱 ETag + must-revalidate；命中 If-None-Match 时 304。
+func TestGroupAvatarGetNamedRendersIcon(t *testing.T) {
 	s, ctx := newTestServer(t)
 	require.NoError(t, testutil.CleanAllTables(ctx))
 	g := New(ctx)
 
-	const groupNo = "avatar_get_named_text_1"
+	const groupNo = "avatar_get_named_icon_1"
 	require.NoError(t, g.db.Insert(&Model{
 		GroupNo: groupNo, Name: "后端架构讨论", Creator: "c1", Status: 1, IsNamed: 1,
 	}))
 
 	w := doAvatarGet(t, s.GetRoute(), groupNo, "")
 	require.Equal(t, http.StatusOK, w.Code)
-	// 命名群也走内容相关弱 ETag：保护改名 / 切自定义触发的缓存失效契约（Jerry-Xin 🔵）。
+	// 命名群也走内容相关弱 ETag：保护切自定义触发的缓存失效契约（Jerry-Xin 🔵）。
 	etag := w.Header().Get("ETag")
 	require.True(t, strings.HasPrefix(etag, `W/"`), "named group avatar must carry a weak ETag, got %q", etag)
 	require.Contains(t, w.Header().Get("Cache-Control"), "must-revalidate")
 
-	want, err := avatarrender.RenderGroup(
-		avatarrender.GroupNameText("后端架构讨论"),
-		avatarrender.GroupStyleForSeed(groupNo),
-		avatarrender.DefaultSize,
-	)
+	// 命名群(is_named=1)无自定义文字 → 双人图标(按 group_no 派生色)，群名不渲成头像文字。
+	wantIcon, err := avatarrender.RenderIcon(avatarrender.GroupStyleForSeed(groupNo))
 	require.NoError(t, err)
-	require.Equal(t, want, w.Body.Bytes(),
-		"named group (is_named=1) without custom text must render script-aware first-2 of the name")
+	require.Equal(t, wantIcon, w.Body.Bytes(),
+		"named group (is_named=1) without custom text must render the two-person icon (name is not avatar text)")
 
 	// 命中的 If-None-Match → 304 无 body（命名群路径同样支持条件请求省渲染）。
 	w2 := doAvatarGet(t, s.GetRoute(), groupNo, etag)
@@ -158,10 +156,10 @@ func TestGroupAvatarGetCustomColorIconNoText(t *testing.T) {
 	require.Equal(t, wantIcon, w.Body.Bytes(), "auto-named group (is_named=0) with custom color + no text must render the two-person icon in that color")
 }
 
-// TestGroupAvatarGetNamedCustomColorRendersNameText 锁定三因子交互(Octo-Q P2-1 建议):
-// 命名群(is_named=1) + 自定义颜色 + **无**自定义文字 → 以该自定义颜色渲染群名前 2 字
-// (而非派生色、而非图标)。补全 is_named=1 与 custom_color 的组合覆盖。
-func TestGroupAvatarGetNamedCustomColorRendersNameText(t *testing.T) {
+// TestGroupAvatarGetNamedCustomColorRendersIcon 锁定改版后三因子交互:命名群(is_named=1)
+// + 自定义颜色 + **无**自定义文字 → 以该自定义颜色渲染双人图标(而非群名文字、而非派生色)。
+// 群名不再作为头像文字来源,但自定义颜色仍被尊重。
+func TestGroupAvatarGetNamedCustomColorRendersIcon(t *testing.T) {
 	s, ctx := newTestServer(t)
 	require.NoError(t, testutil.CleanAllTables(ctx))
 	g := New(ctx)
@@ -176,14 +174,10 @@ func TestGroupAvatarGetNamedCustomColorRendersNameText(t *testing.T) {
 
 	style, ok := avatarrender.GroupStyleByIndex(7)
 	require.True(t, ok)
-	want, err := avatarrender.RenderGroup(
-		avatarrender.GroupNameText("后端架构讨论"),
-		style,
-		avatarrender.DefaultSize,
-	)
+	wantIcon, err := avatarrender.RenderIcon(style)
 	require.NoError(t, err)
-	require.Equal(t, want, w.Body.Bytes(),
-		"named group (is_named=1) with custom color + no text must render name first-2 in that custom color")
+	require.Equal(t, wantIcon, w.Body.Bytes(),
+		"named group (is_named=1) with custom color + no text must render the two-person icon in that custom color")
 }
 
 // TestGroupAvatarGetCustomTextNotTruncated 回归 PR#494 评审(Jerry-Xin):用户显式
@@ -242,7 +236,7 @@ func TestGroupAvatarGetNonexistentReturns404(t *testing.T) {
 }
 
 // TestGroupAvatarGetDisbandedReturns404 回归:已解散的群(行仍在但 Status=Disband)同样
-// 必须 404,不得在公开端点把其群名渲成 PNG(信息泄露 + 「已解散」vs「从未存在」枚举)。
+// 必须 404,不得在公开端点为其出图(若设过 avatar_text 会泄露文字 + 「已解散」vs「从未存在」枚举)。
 func TestGroupAvatarGetDisbandedReturns404(t *testing.T) {
 	s, ctx := newTestServer(t)
 	require.NoError(t, testutil.CleanAllTables(ctx))

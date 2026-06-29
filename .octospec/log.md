@@ -4,6 +4,20 @@ Change history for this repo's `.octospec/`, following the
 [OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)
 change-log convention (§7). Newest first.
 
+## 2026-06-29
+
+- **Change** — Task `group-avatar-name-no-text` (supersedes `group-avatar-icon-default`
+  S2): product re-pivot — the group **name** is no longer an avatar-text source.
+  Default group avatar is now the two-person icon unless a custom `avatar_text` is
+  set; the `is_named=1 → GroupNameText(name)` render branch in
+  `writeGroupDefaultAvatar` is removed. Global (existing user-named groups flip to
+  the icon too; they converge via the content-derived ETag within `max-age`, no
+  migration). `is_named` column + lifecycle kept dormant (not dropped, no new
+  migration, render path no longer reads it); `GroupResp.is_named` stays as
+  informational. No render-version bump (icon/name pixels untouched; only mode
+  selection changed). Comments + `swagger/api.yaml` updated to the new rule. Brief
+  under `.octospec/tasks/group-avatar-name-no-text/`.
+
 ## 2026-06-27
 
 - **Add** — Task `default-avatar-text-rule`: script-aware 2-glyph text rule for
